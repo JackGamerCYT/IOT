@@ -1,0 +1,254 @@
+// File này chứa trang web (sinh ra từ web/index.html). Sửa giao diện thì sửa index.html
+// rồi dán lại toàn bộ nội dung vào giữa R"rawliteral( ... )rawliteral".
+#pragma once
+#include <Arduino.h>
+const char INDEX_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Đồ án 1 – Giám sát môi trường</title>
+<style>
+  :root{--bg:#0f172a;--card:#1e293b;--line:#334155;--txt:#e2e8f0;--mut:#94a3b8;
+        --ok:#10b981;--bad:#ef4444;--warn:#f59e0b;--acc:#38bdf8;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.45 system-ui,Segoe UI,Roboto,Arial,sans-serif}
+  .wrap{max-width:1100px;margin:auto;padding:16px}
+  header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px}
+  h1{font-size:20px;margin:0;color:var(--acc)}
+  .sub{color:var(--mut);font-size:13px}
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:600;font-size:13px}
+  .on{background:#064e3b;color:#6ee7b7}.off{background:#450a0a;color:#fca5a5}.idle{background:#334155;color:#cbd5e1}
+  .grid{display:grid;gap:12px}
+  .g5{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .lbl{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  .val{font-size:30px;font-weight:700;margin-top:4px}
+  .unit{font-size:15px;color:var(--mut);font-weight:400}
+  .note{color:var(--mut);font-size:12px;margin-top:2px;min-height:16px}
+  h2{font-size:16px;margin:18px 0 8px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  button{border:0;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;color:#fff}
+  .bOn{background:#059669}.bOff{background:#dc2626}.bSave{background:#0284c7}
+  button:disabled{opacity:.5;cursor:default}
+  .switch{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+  .switch input{width:18px;height:18px}
+  canvas{width:100%;height:90px;display:block}
+  label.f{display:flex;flex-direction:column;font-size:13px;color:var(--mut);gap:4px}
+  input[type=number],input[type=text]{background:#0b1220;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px;width:100%}
+  .cfg{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  #log{font:12px/1.5 Consolas,monospace;max-height:180px;overflow:auto;color:#cbd5e1}
+  #ipbox{display:none}
+  footer{color:var(--mut);font-size:12px;margin-top:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Đồ án 1 – Giám sát môi trường &amp; điều khiển thiết bị</h1>
+      <div class="sub">ESP32 · DHT22 · BH1750 · MQ-135 · PIR · Relay 2 kênh</div>
+    </div>
+    <div class="row">
+      <span id="ipbox" class="row"><input id="ip" type="text" placeholder="IP ESP32, vd 192.168.1.50" style="width:210px"><button class="bSave" onclick="setIp()">Kết nối</button></span>
+      <span id="conn" class="badge idle">Đang kết nối…</span>
+    </div>
+  </header>
+
+  <div class="grid g5">
+    <div class="card"><div class="lbl">Nhiệt độ</div><div class="val"><span id="t">--</span> <span class="unit">°C</span></div><div class="note" id="tN"></div></div>
+    <div class="card"><div class="lbl">Độ ẩm</div><div class="val"><span id="h">--</span> <span class="unit">%</span></div><div class="note">DHT22</div></div>
+    <div class="card"><div class="lbl">Ánh sáng</div><div class="val"><span id="lux">--</span> <span class="unit">lux</span></div><div class="note" id="luxN"></div></div>
+    <div class="card"><div class="lbl">Không khí (MQ-135)</div><div class="val"><span id="gas">--</span> <span class="unit">ADC</span></div><div class="note" id="gasN"></div></div>
+    <div class="card"><div class="lbl">Chuyển động (PIR)</div><div class="val" id="mot">--</div><div class="note" id="motN"></div></div>
+  </div>
+
+  <h2>Điều khiển thiết bị</h2>
+  <div class="grid g2">
+    <div class="card" id="r1card">
+      <div class="row" style="justify-content:space-between">
+        <div><b>Relay 1 · Đèn</b><div class="note">GPIO 25 · tự bật khi có người và trời tối</div></div>
+        <span id="r1" class="badge idle">--</span>
+      </div>
+      <div class="row" style="margin-top:10px;justify-content:space-between">
+        <label class="switch"><input type="checkbox" id="a1" onchange="setAuto(1,this.checked)"> Tự động (AUTO)</label>
+        <div class="row"><button class="bOn" onclick="relay(1,1)">BẬT</button><button class="bOff" onclick="relay(1,0)">TẮT</button></div>
+      </div>
+      <div class="note" id="why1"></div>
+    </div>
+    <div class="card" id="r2card">
+      <div class="row" style="justify-content:space-between">
+        <div><b>Relay 2 · Quạt / thông gió</b><div class="note">GPIO 26 · tự bật khi nóng hoặc không khí kém</div></div>
+        <span id="r2" class="badge idle">--</span>
+      </div>
+      <div class="row" style="margin-top:10px;justify-content:space-between">
+        <label class="switch"><input type="checkbox" id="a2" onchange="setAuto(2,this.checked)"> Tự động (AUTO)</label>
+        <div class="row"><button class="bOn" onclick="relay(2,1)">BẬT</button><button class="bOff" onclick="relay(2,0)">TẮT</button></div>
+      </div>
+      <div class="note" id="why2"></div>
+    </div>
+  </div>
+  <div class="note">Bấm BẬT/TẮT sẽ chuyển relay đó sang chế độ tay (MANUAL). Tick “Tự động” để giao lại cho mạch tự điều khiển.</div>
+
+  <h2>Đồ thị 5 phút gần nhất</h2>
+  <div class="grid g2">
+    <div class="card"><div class="lbl">Nhiệt độ (°C)</div><canvas id="cT"></canvas></div>
+    <div class="card"><div class="lbl">Ánh sáng (lux)</div><canvas id="cL"></canvas></div>
+    <div class="card"><div class="lbl">Không khí MQ-135 (ADC)</div><canvas id="cG"></canvas></div>
+    <div class="card"><div class="lbl">Độ ẩm (%)</div><canvas id="cH"></canvas></div>
+  </div>
+
+  <h2>Cài đặt ngưỡng tự động</h2>
+  <div class="card">
+    <div class="cfg">
+      <label class="f">Trời tối khi ánh sáng dưới (lux)<input type="number" id="cLux" min="0" max="65000" step="1"></label>
+      <label class="f">Giữ đèn sau lần chuyển động cuối (giây)<input type="number" id="cHold" min="5" max="3600" step="1"></label>
+      <label class="f">Bật quạt khi nhiệt độ từ (°C)<input type="number" id="cTon" min="10" max="60" step="0.5"></label>
+      <label class="f">Bật quạt khi MQ-135 từ (ADC 0–4095)<input type="number" id="cGas" min="100" max="4095" step="10"></label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="bSave" onclick="saveCfg()">Lưu cài đặt</button><span class="note" id="cfgMsg"></span></div>
+  </div>
+
+  <h2>Nhật ký</h2>
+  <div class="card"><div id="log">Chưa có sự kiện.</div></div>
+
+  <footer id="foot">--</footer>
+</div>
+
+<script>
+// Khi trang do ESP32 phát ra thì gọi API cùng địa chỉ; khi mở file trực tiếp thì nhập IP ESP32.
+let BASE = '';
+if (!location.protocol.startsWith('http')) {
+  document.getElementById('ipbox').style.display = 'flex';
+  try { BASE = localStorage.getItem('esp_ip') || ''; } catch (e) {}
+  document.getElementById('ip').value = BASE.replace('http://', '');
+}
+function setIp() {
+  let v = document.getElementById('ip').value.trim();
+  if (v && !v.startsWith('http')) v = 'http://' + v;
+  BASE = v.replace(/\/$/, '');
+  try { localStorage.setItem('esp_ip', BASE); } catch (e) {}
+  poll();
+}
+
+const $ = id => document.getElementById(id);
+const N = 300;                          // 300 điểm × 1 s = 5 phút
+const hist = { t: [], h: [], lux: [], gas: [] };
+let cfgLoaded = false, lastEv = -1, failCount = 0;
+
+async function api(path, method = 'GET') {
+  const ctl = new AbortController();
+  const tm = setTimeout(() => ctl.abort(), 3000);
+  try {
+    const r = await fetch(BASE + path, { method, signal: ctl.signal });
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } finally { clearTimeout(tm); }
+}
+
+function fmt(v, d) { return (v === null || v === undefined) ? '--' : Number(v).toFixed(d); }
+function push(arr, v) { arr.push(v); if (arr.length > N) arr.shift(); }
+function badge(el, on) { el.textContent = on ? 'ĐANG BẬT' : 'ĐANG TẮT'; el.className = 'badge ' + (on ? 'on' : 'off'); }
+
+function render(s) {
+  $('t').textContent = fmt(s.t, 1);
+  $('h').textContent = fmt(s.h, 1);
+  $('lux').textContent = fmt(s.lux, 0);
+  $('gas').textContent = fmt(s.gas, 0);
+  $('tN').textContent = s.t === null ? 'Lỗi đọc DHT22' : (s.t >= s.cfg.tOn ? 'Nóng – vượt ngưỡng ' + s.cfg.tOn + ' °C' : 'Ngưỡng bật quạt ' + s.cfg.tOn + ' °C');
+  $('luxN').textContent = s.lux === null ? 'Lỗi đọc BH1750' : (s.lux < s.cfg.luxOn ? 'Tối (dưới ' + s.cfg.luxOn + ' lux)' : 'Sáng');
+  if (s.warm > 0) $('gasN').textContent = 'Đang làm nóng cảm biến, còn ' + s.warm + ' s';
+  else {
+    const lvl = s.gas >= s.cfg.gasOn ? 'Kém' : (s.gas >= s.cfg.gasOn * 0.75 ? 'Trung bình' : 'Tốt');
+    $('gasN').textContent = lvl + ' · ' + fmt(s.gasV, 2) + ' V';
+  }
+  $('mot').textContent = s.motion ? 'CÓ NGƯỜI' : 'Không';
+  $('mot').style.color = s.motion ? 'var(--warn)' : 'var(--txt)';
+  $('motN').textContent = s.motionAgo < 0 ? 'Chưa phát hiện lần nào' : 'Lần cuối: ' + s.motionAgo + ' s trước';
+
+  badge($('r1'), s.r1); badge($('r2'), s.r2);
+  $('a1').checked = !!s.a1; $('a2').checked = !!s.a2;
+  $('why1').textContent = (s.a1 ? 'AUTO: ' : 'MANUAL: ') + s.why1;
+  $('why2').textContent = (s.a2 ? 'AUTO: ' : 'MANUAL: ') + s.why2;
+
+  if (!cfgLoaded) {
+    $('cLux').value = s.cfg.luxOn; $('cHold').value = s.cfg.hold;
+    $('cTon').value = s.cfg.tOn;   $('cGas').value = s.cfg.gasOn;
+    cfgLoaded = true;
+  }
+  if (s.evn !== lastEv) {
+    lastEv = s.evn;
+    $('log').innerHTML = s.ev.length ? s.ev.map(e => '<div>' + e.replace(/</g, '&lt;') + '</div>').join('') : 'Chưa có sự kiện.';
+  }
+  const up = s.uptime, hh = Math.floor(up / 3600), mm = Math.floor(up % 3600 / 60);
+  $('foot').textContent = 'IP ' + s.ip + ' · WiFi ' + s.mode + (s.rssi ? ' (' + s.rssi + ' dBm)' : '') +
+                          ' · Giờ ' + s.clock + ' · Chạy được ' + hh + ' giờ ' + mm + ' phút';
+
+  push(hist.t, s.t); push(hist.h, s.h); push(hist.lux, s.lux); push(hist.gas, s.gas);
+  draw('cT', hist.t, '#f59e0b', s.cfg.tOn);
+  draw('cL', hist.lux, '#38bdf8', s.cfg.luxOn);
+  draw('cG', hist.gas, '#a78bfa', s.cfg.gasOn);
+  draw('cH', hist.h, '#34d399', null);
+}
+
+// Vẽ đồ thị đường đơn giản (không cần thư viện, chạy được khi không có Internet)
+function draw(id, data, color, limit) {
+  const c = $(id), dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== w * dpr) { c.width = w * dpr; c.height = h * dpr; }
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  const v = data.filter(x => x !== null && x !== undefined);
+  if (v.length < 2) return;
+  let lo = Math.min(...v), hi = Math.max(...v);
+  if (limit !== null) { lo = Math.min(lo, limit); hi = Math.max(hi, limit); }
+  if (hi - lo < 1e-6) { hi += 1; lo -= 1; }
+  const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+  const X = i => 34 + (w - 38) * i / (N - 1), Y = y => 6 + (h - 18) * (1 - (y - lo) / (hi - lo));
+  g.fillStyle = '#94a3b8'; g.font = '10px sans-serif';
+  g.fillText(hi.toFixed(hi < 10 ? 1 : 0), 0, 12); g.fillText(lo.toFixed(lo < 10 ? 1 : 0), 0, h - 8);
+  if (limit !== null) {
+    g.strokeStyle = '#ef4444'; g.setLineDash([4, 4]); g.beginPath();
+    g.moveTo(34, Y(limit)); g.lineTo(w - 4, Y(limit)); g.stroke(); g.setLineDash([]);
+  }
+  g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
+  const off = N - data.length; let started = false;
+  data.forEach((y, i) => {
+    if (y === null || y === undefined) { started = false; return; }
+    const px = X(i + off), py = Y(y);
+    if (!started) { g.moveTo(px, py); started = true; } else g.lineTo(px, py);
+  });
+  g.stroke();
+}
+
+async function poll() {
+  if (!location.protocol.startsWith('http') && !BASE) { $('conn').textContent = 'Nhập IP ESP32'; return; }
+  try {
+    const s = await api('/api/state');
+    failCount = 0;
+    $('conn').textContent = 'Đã kết nối'; $('conn').className = 'badge on';
+    render(s);
+  } catch (e) {
+    if (++failCount >= 2) { $('conn').textContent = 'Mất kết nối'; $('conn').className = 'badge off'; }
+  }
+}
+async function relay(ch, on) {
+  try { render(await api('/api/relay?ch=' + ch + '&on=' + on, 'POST')); } catch (e) { alertMsg('Không gửi được lệnh'); }
+}
+async function setAuto(ch, on) {
+  try { render(await api('/api/auto?ch=' + ch + '&on=' + (on ? 1 : 0), 'POST')); } catch (e) { alertMsg('Không gửi được lệnh'); }
+}
+async function saveCfg() {
+  const q = 'luxOn=' + $('cLux').value + '&hold=' + $('cHold').value + '&tOn=' + $('cTon').value + '&gasOn=' + $('cGas').value;
+  try { cfgLoaded = false; render(await api('/api/config?' + q, 'POST')); $('cfgMsg').textContent = 'Đã lưu vào ESP32'; }
+  catch (e) { $('cfgMsg').textContent = 'Lưu thất bại'; }
+  setTimeout(() => $('cfgMsg').textContent = '', 3000);
+}
+function alertMsg(m) { $('cfgMsg').textContent = m; setTimeout(() => $('cfgMsg').textContent = '', 3000); }
+
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>
+)rawliteral";
