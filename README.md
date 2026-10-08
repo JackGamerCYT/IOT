@@ -1,13 +1,13 @@
 # 🌿 Đồ án 1 — Giám sát môi trường & điều khiển thiết bị (ESP32)
 
-ESP32 đọc nhiệt độ, độ ẩm (DHT22), ánh sáng (BH1750), chất lượng không khí (MQ-135) và chuyển động (PIR), tự bật/tắt **đèn** và **quạt** qua module relay 2 kênh, đồng thời **tự phát một trang web** để theo dõi và điều khiển từ điện thoại hoặc máy tính trong cùng mạng WiFi. Không cần server, không cần Internet.
+ESP32 đọc nhiệt độ, độ ẩm (DHT22), ánh sáng (BH1750), chất lượng không khí (MQ-135) và chuyển động (PIR), tự bật/tắt **đèn** và **quạt** qua module relay 2 kênh, đồng thời **tự phát WiFi mở `DoAn1-ESP32` (không mật khẩu) và trang web điều khiển**. Điện thoại/laptop vào WiFi đó là trang web tự bật lên. Không cần server, không cần Internet, không cần sửa code.
 
 ```
  [12 V]──[LM2596 → 5 V]──> ESP32 (VIN), relay, cảm biến
                              │
   DHT22 ──GPIO14             │  WiFi (STA, tự chuyển AP nếu không vào được)
-  PIR   ──GPIO12             ▼
-  MQ-135──GPIO35 (ADC)    WebServer :80 ──> http://<IP-ESP32>  hoặc  http://doan1.local
+  PIR   ──GPIO12             ▼  WiFi mở "DoAn1-ESP32" (luôn bật) + WiFi nhà (tuỳ chọn, nhập trên web)
+  MQ-135──GPIO35 (ADC)    WebServer :80 ──> http://192.168.4.1 (captive portal tự mở) | http://doan1.local
   BH1750──GPIO21/22 (I2C)     │  GET  /api/state            (JSON, trang web gọi 1 s/lần)
                               │  POST /api/relay /api/auto /api/config
   Relay IN1──GPIO25 ── Đèn    │
@@ -43,11 +43,19 @@ DO-AN1-CODE/
    - `DHT sensor library` — **by Adafruit** (bấm *Install All* để cài kèm `Adafruit Unified Sensor`)
    - `BH1750` — **by Christopher Laws**
 3. **Mở `firmware/do_an1/do_an1.ino`** (mở cả thư mục `do_an1`, phải thấy 2 tab `do_an1.ino` và `index_html.h`).
-4. **Điền WiFi**: sửa `WIFI_SSID`, `WIFI_PASSWORD` ở đầu `do_an1.ino`, hoặc copy `secrets.example.h` thành `secrets.h` rồi điền vào đó.
-5. *Tools → Board* chọn **ESP32 Dev Module**, chọn đúng cổng COM, bấm **Upload**.
-6. Mở *Serial Monitor* **115200 baud**, nhấn EN. Dòng `Đã vào WiFi. Mở trình duyệt: http://192.168.x.x` cho biết địa chỉ web.
+4. *Tools → Board* chọn **ESP32 Dev Module**, chọn đúng cổng COM, bấm **Upload**. **Không cần sửa WiFi trong code.**
 
-Không vào được WiFi sau 15 s → ESP32 tự phát WiFi **`DoAn1-ESP32`** (mật khẩu `12345678`), kết nối vào rồi mở **http://192.168.4.1**.
+## 2b. Kết nối (không mật khẩu, tự tìm IP)
+
+| Cách | Làm gì | Địa chỉ |
+|---|---|---|
+| **Trực tiếp (khuyên dùng)** | Điện thoại/laptop vào WiFi **`DoAn1-ESP32`** (mạng mở). Điện thoại thường **tự bật trang web** (captive portal); nếu không thì mở trình duyệt | **http://192.168.4.1** |
+| Qua WiFi nhà (tuỳ chọn) | Đang ở trang web → khung **Kết nối WiFi**: *Quét WiFi* → chọn mạng → nhập mật khẩu WiFi nhà → *Vào WiFi này* (lưu vào Flash) | IP hiện ngay trên trang và trên Serial |
+| Mở file `index.html` trên máy tính | Trang **tự dò ESP32**: IP đã lưu → `doan1.local` → `192.168.4.1` → quét các mạng 192.168.1.x, 192.168.0.x… Nút **Tự tìm ESP32** để dò lại | tự động |
+
+- WiFi do ESP32 phát **luôn bật**, kể cả khi đã vào WiFi nhà, nên lúc nào cũng có đường vào trực tiếp.
+- Muốn khoá WiFi phát: đặt `AP_PASS` (≥ 8 ký tự) trong `do_an1.ino`. Mạng mở nghĩa là ai ở gần cũng điều khiển được relay.
+- `secrets.h` không còn bắt buộc; chỉ dùng nếu muốn ghi sẵn WiFi nhà trong firmware.
 
 ## 3. Phần cứng
 
@@ -82,12 +90,17 @@ Chi tiết đấu nối và an toàn: [`docs/WIRING.md`](docs/WIRING.md).
 | POST | `/api/relay` | `ch=1\|2`, `on=0\|1` | Bật/tắt tay, chuyển relay đó sang MANUAL |
 | POST | `/api/auto` | `ch=1\|2`, `on=0\|1` | Bật/tắt chế độ AUTO |
 | POST | `/api/config` | `luxOn`, `hold`, `tOn`, `gasOn` | Đổi ngưỡng, lưu Flash |
+| GET | `/api/id` | — | `{"dev":"doan1","ip":…}` — trang web dùng để dò IP |
+| GET | `/api/wifi/scan` | — | Danh sách WiFi xung quanh `[{"ssid","rssi","open"}]` |
+| POST | `/api/wifi` | `ssid`, `pass` | Lưu và vào WiFi nhà |
+| POST | `/api/wifi/forget` | — | Bỏ WiFi nhà, chỉ dùng WiFi do ESP32 phát |
 
 ```json
 {"t":29.4,"h":68.2,"lux":35.0,"gas":1640,"gasV":1.238,"warm":0,"motion":1,"motionAgo":0,
  "r1":1,"a1":1,"why1":"Có người, trời tối (35 lux)","r2":0,"a2":1,"why2":"Nhiệt độ và không khí bình thường",
  "cfg":{"luxOn":50,"hold":30,"tOn":32.0,"gasOn":2000},"evn":7,"ev":["14:02:11  Đèn BẬT – Có người, trời tối (35 lux)"],
- "ip":"192.168.1.50","mode":"TenWiFi","rssi":-58,"clock":"14:02:12","uptime":3600}
+ "ip":"192.168.1.50","apSsid":"DoAn1-ESP32","apIp":"192.168.4.1","staSsid":"WiFi-Nha","staOk":1,"staIp":"192.168.1.50",
+ "mode":"WiFi WiFi-Nha + DoAn1-ESP32","rssi":-58,"clock":"14:02:12","uptime":3600}
 ```
 
 Giá trị lỗi cảm biến trả về `null`. Mọi phản hồi có header `Access-Control-Allow-Origin: *`, nên `index.html` mở trực tiếp trên máy tính (nhập IP ESP32 ở góc trên) vẫn gọi được API.
@@ -97,7 +110,7 @@ Giá trị lỗi cảm biến trả về `null`. Mọi phản hồi có header `
 ```bash
 python tools/device_simulator.py
 ```
-Mở http://localhost:8080 — số liệu giả, luật tự động chạy giống firmware. Chỉ cần Python 3, không cài thêm gì.
+Mở http://localhost:8080 — số liệu giả (có cả quét/vào WiFi giả), luật tự động chạy giống firmware. Chỉ cần Python 3, không cài thêm gì.
 
 ## 7. Sửa giao diện
 

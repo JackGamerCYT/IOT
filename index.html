@@ -47,7 +47,7 @@
       <div class="sub">ESP32 · DHT22 · BH1750 · MQ-135 · PIR · Relay 2 kênh</div>
     </div>
     <div class="row">
-      <span id="ipbox" class="row"><input id="ip" type="text" placeholder="IP ESP32, vd 192.168.1.50" style="width:210px"><button class="bSave" onclick="setIp()">Kết nối</button></span>
+      <span id="ipbox" class="row"><button class="bSave" onclick="discover(true)">Tự tìm ESP32</button><input id="ip" type="text" placeholder="hoặc nhập IP, vd 192.168.1.50" style="width:200px"><button class="bSave" onclick="setIp()">Kết nối</button></span>
       <span id="conn" class="badge idle">Đang kết nối…</span>
     </div>
   </header>
@@ -106,6 +106,23 @@
     <div class="row" style="margin-top:12px"><button class="bSave" onclick="saveCfg()">Lưu cài đặt</button><span class="note" id="cfgMsg"></span></div>
   </div>
 
+  <h2>Kết nối WiFi</h2>
+  <div class="card">
+    <div id="apInfo" class="note" style="font-size:14px">--</div>
+    <div id="staInfo" class="note" style="font-size:14px;margin-top:4px">--</div>
+    <div class="cfg" style="margin-top:12px">
+      <label class="f">WiFi nhà (tuỳ chọn)<select id="wSsid" style="background:#0b1220;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px"><option value="">— bấm Quét WiFi —</option></select></label>
+      <label class="f">Mật khẩu (để trống nếu WiFi mở)<input type="text" id="wPass" autocomplete="off"></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="bSave" onclick="scanWifi()">Quét WiFi</button>
+      <button class="bOn" onclick="joinWifi()">Vào WiFi này</button>
+      <button class="bOff" onclick="forgetWifi()">Bỏ WiFi nhà</button>
+      <span class="note" id="wMsg"></span>
+    </div>
+    <div class="note" style="margin-top:8px">Không bắt buộc. Không cài WiFi nhà thì cứ vào WiFi do ESP32 phát là dùng được ngay. Cài WiFi nhà để mở trang từ máy đang dùng mạng nhà (trang sẽ tự dò IP của ESP32).</div>
+  </div>
+
   <h2>Nhật ký</h2>
   <div class="card"><div id="log">Chưa có sự kiện.</div></div>
 
@@ -113,27 +130,64 @@
 </div>
 
 <script>
-// Trang do ESP32 phát ra -> gọi API cùng địa chỉ. Mở file trực tiếp, mở bằng Live Server,
-// hoặc gọi cùng địa chỉ thất bại -> hiện ô nhập IP ESP32 (lưu lại cho lần sau).
+// Kết nối: trang do ESP32 phát -> gọi cùng địa chỉ. Mở file index.html trên máy tính, hoặc gọi
+// thất bại -> TỰ DÒ ESP32: IP đã lưu, doan1.local, 192.168.4.1 (WiFi do ESP32 phát), rồi quét mạng LAN.
 const isFile = !location.protocol.startsWith('http');
+const qs = new URLSearchParams(location.search);
+const PORT = qs.get('port') ? ':' + qs.get('port') : '';           // chỉ dùng khi thử với bộ giả lập
 let saved = '';
 try { saved = localStorage.getItem('esp_ip') || ''; } catch (e) {}
-const qIp = new URLSearchParams(location.search).get('ip');      // vd index.html?ip=192.168.1.50
-if (qIp) saved = qIp.startsWith('http') ? qIp : 'http://' + qIp;
-let BASE = (isFile || qIp) ? saved : '';
-let triedSaved = !!BASE;
+if (qs.get('ip')) saved = qs.get('ip').startsWith('http') ? qs.get('ip') : 'http://' + qs.get('ip');
+let BASE = isFile ? null : '';          // null = chưa biết ESP32 ở đâu
+let searching = false;
 document.getElementById('ip').value = saved.replace('http://', '');
-if (isFile) document.getElementById('ipbox').style.display = 'flex';
+
+function useBase(b) {
+  BASE = b; failCount = 0;
+  if (b) { try { localStorage.setItem('esp_ip', b); } catch (e) {} saved = b; }
+  document.getElementById('ip').value = (b || '').replace('http://', '');
+  poll();
+}
 function setIp() {
   let v = document.getElementById('ip').value.trim();
-  if (!v) { BASE = ''; poll(); return; }
+  if (!v) return discover(true);
   if (!v.startsWith('http')) v = 'http://' + v;
-  BASE = v.replace(/\/$/, '');
-  triedSaved = true;
-  try { localStorage.setItem('esp_ip', BASE); } catch (e) {}
-  failCount = 0;
-  $('conn').textContent = 'Đang kết nối…'; $('conn').className = 'badge idle';
-  poll();
+  useBase(v.replace(/\/$/, ''));
+}
+async function probe(base, ms) {        // có phải ESP32 của đồ án không?
+  const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), ms);
+  try { const r = await fetch(base + '/api/id', { signal: ctl.signal }); const j = await r.json(); return j.dev === 'doan1' ? base : null; }
+  catch (e) { return null; } finally { clearTimeout(tm); }
+}
+async function discover(manual) {
+  if (searching) return;
+  searching = true;
+  const conn = document.getElementById('conn');
+  document.getElementById('ipbox').style.display = 'flex';
+  const show = t => { conn.textContent = t; conn.className = 'badge idle'; };
+  try {
+    const first = [];
+    if (!isFile) first.push(location.origin);
+    if (saved) first.push(saved);
+    first.push('http://doan1.local' + PORT, 'http://192.168.4.1' + PORT);
+    show('Đang tìm ESP32…');
+    for (const c of [...new Set(first)]) { if (await probe(c, 1500)) return useBase(c === location.origin ? '' : c); }
+    const nets = [];
+    if (qs.get('net')) nets.push(qs.get('net'));
+    const m = saved.match(/(\d+\.\d+\.\d+)\.\d+/); if (m) nets.push(m[1]);
+    nets.push('192.168.1', '192.168.0', '192.168.2', '192.168.100', '192.168.31', '10.0.0', '172.20.10');
+    for (const net of [...new Set(nets)]) {
+      for (let start = 1; start <= 254; start += 64) {
+        show('Đang dò ' + net + '.' + start + '–' + Math.min(start + 63, 254) + '…');
+        const batch = [];
+        for (let i = start; i < start + 64 && i <= 254; i++) batch.push(probe('http://' + net + '.' + i + PORT, 1500));
+        const hit = (await Promise.all(batch)).find(x => x);
+        if (hit) return useBase(hit);
+      }
+    }
+    conn.textContent = 'Không tìm thấy ESP32'; conn.className = 'badge off';
+    if (manual) alertMsg('Hãy vào WiFi "DoAn1-ESP32" rồi bấm Tự tìm, hoặc nhập IP trong Serial Monitor');
+  } finally { searching = false; }
 }
 
 const $ = id => document.getElementById(id);
@@ -145,7 +199,7 @@ async function api(path, method = 'GET') {
   const ctl = new AbortController();
   const tm = setTimeout(() => ctl.abort(), 3000);
   try {
-    const r = await fetch(BASE + path, { method, signal: ctl.signal });
+    const r = await fetch((BASE || '') + path, { method, signal: ctl.signal });
     if (!r.ok) throw new Error(r.status);
     return await r.json();
   } finally { clearTimeout(tm); }
@@ -184,6 +238,11 @@ function render(s) {
   if (s.evn !== lastEv) {
     lastEv = s.evn;
     $('log').innerHTML = s.ev.length ? s.ev.map(e => '<div>' + e.replace(/</g, '&lt;') + '</div>').join('') : 'Chưa có sự kiện.';
+  }
+  if (s.apSsid) {
+    $('apInfo').innerHTML = '📶 ESP32 phát WiFi <b>' + s.apSsid + '</b> (không mật khẩu) → mở <b>http://' + s.apIp + '</b>';
+    $('staInfo').innerHTML = !s.staSsid ? '🏠 WiFi nhà: chưa cài' : (s.staOk ? '🏠 Đã vào WiFi nhà <b>' + s.staSsid +
+      '</b> → trong mạng nhà mở <b>http://' + s.staIp + '</b> (' + s.rssi + ' dBm)' : '🏠 Đang thử vào WiFi nhà <b>' + s.staSsid + '</b>… (sai mật khẩu hoặc WiFi 5 GHz sẽ không vào được)');
   }
   const up = s.uptime, hh = Math.floor(up / 3600), mm = Math.floor(up % 3600 / 60);
   $('foot').textContent = 'IP ' + s.ip + ' · WiFi ' + s.mode + (s.rssi ? ' (' + s.rssi + ' dBm)' : '') +
@@ -226,18 +285,15 @@ function draw(id, data, color, limit) {
 }
 
 async function poll() {
-  if (isFile && !BASE) { $('conn').textContent = 'Nhập IP ESP32'; $('conn').className = 'badge idle'; return; }
+  if (BASE === null) { if (!searching) discover(false); return; }
   try {
-    const s = await api('/api/state');
+    const st = await api('/api/state');
     failCount = 0;
     $('conn').textContent = 'Đã kết nối ' + (BASE ? BASE.replace('http://', '') : ''); $('conn').className = 'badge on';
-    render(s);
+    if (BASE) $('ipbox').style.display = 'flex';
+    render(st);
   } catch (e) {
-    if (++failCount >= 2) {
-      $('conn').textContent = 'Mất kết nối – kiểm tra IP ESP32'; $('conn').className = 'badge off';
-      $('ipbox').style.display = 'flex';                       // cho phép nhập IP ESP32
-      if (!triedSaved && saved) { BASE = saved; triedSaved = true; failCount = 0; }   // thử IP đã lưu
-    }
+    if (++failCount === 3) { $('conn').textContent = 'Mất kết nối'; $('conn').className = 'badge off'; discover(false); }
   }
 }
 async function relay(ch, on) {
@@ -253,6 +309,24 @@ async function saveCfg() {
   setTimeout(() => $('cfgMsg').textContent = '', 3000);
 }
 function alertMsg(m) { $('cfgMsg').textContent = m; setTimeout(() => $('cfgMsg').textContent = '', 3000); }
+
+async function scanWifi() {
+  $('wMsg').textContent = 'Đang quét…';
+  try {
+    const list = await api('/api/wifi/scan');
+    $('wSsid').innerHTML = list.length ? list.map(w => '<option value="' + w.ssid.replace(/"/g, '&quot;') + '">' +
+      w.ssid.replace(/</g, '&lt;') + ' (' + w.rssi + ' dBm' + (w.open ? ', mở' : '') + ')</option>').join('') : '<option value="">Không thấy WiFi nào</option>';
+    $('wMsg').textContent = 'Tìm thấy ' + list.length + ' mạng';
+  } catch (e) { $('wMsg').textContent = 'Quét thất bại'; }
+}
+async function joinWifi() {
+  const ss = $('wSsid').value; if (!ss) { $('wMsg').textContent = 'Chọn WiFi trước (bấm Quét WiFi)'; return; }
+  try { render(await api('/api/wifi?ssid=' + encodeURIComponent(ss) + '&pass=' + encodeURIComponent($('wPass').value), 'POST'));
+        $('wMsg').textContent = 'Đang vào WiFi, chờ khoảng 10 s…'; } catch (e) { $('wMsg').textContent = 'Gửi thất bại'; }
+}
+async function forgetWifi() {
+  try { render(await api('/api/wifi/forget', 'POST')); $('wMsg').textContent = 'Đã bỏ WiFi nhà'; } catch (e) { $('wMsg').textContent = 'Gửi thất bại'; }
+}
 
 poll();
 setInterval(poll, 1000);
