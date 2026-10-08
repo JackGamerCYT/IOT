@@ -113,18 +113,26 @@
 </div>
 
 <script>
-// Khi trang do ESP32 phát ra thì gọi API cùng địa chỉ; khi mở file trực tiếp thì nhập IP ESP32.
-let BASE = '';
-if (!location.protocol.startsWith('http')) {
-  document.getElementById('ipbox').style.display = 'flex';
-  try { BASE = localStorage.getItem('esp_ip') || ''; } catch (e) {}
-  document.getElementById('ip').value = BASE.replace('http://', '');
-}
+// Trang do ESP32 phát ra -> gọi API cùng địa chỉ. Mở file trực tiếp, mở bằng Live Server,
+// hoặc gọi cùng địa chỉ thất bại -> hiện ô nhập IP ESP32 (lưu lại cho lần sau).
+const isFile = !location.protocol.startsWith('http');
+let saved = '';
+try { saved = localStorage.getItem('esp_ip') || ''; } catch (e) {}
+const qIp = new URLSearchParams(location.search).get('ip');      // vd index.html?ip=192.168.1.50
+if (qIp) saved = qIp.startsWith('http') ? qIp : 'http://' + qIp;
+let BASE = (isFile || qIp) ? saved : '';
+let triedSaved = !!BASE;
+document.getElementById('ip').value = saved.replace('http://', '');
+if (isFile) document.getElementById('ipbox').style.display = 'flex';
 function setIp() {
   let v = document.getElementById('ip').value.trim();
-  if (v && !v.startsWith('http')) v = 'http://' + v;
+  if (!v) { BASE = ''; poll(); return; }
+  if (!v.startsWith('http')) v = 'http://' + v;
   BASE = v.replace(/\/$/, '');
+  triedSaved = true;
   try { localStorage.setItem('esp_ip', BASE); } catch (e) {}
+  failCount = 0;
+  $('conn').textContent = 'Đang kết nối…'; $('conn').className = 'badge idle';
   poll();
 }
 
@@ -218,14 +226,18 @@ function draw(id, data, color, limit) {
 }
 
 async function poll() {
-  if (!location.protocol.startsWith('http') && !BASE) { $('conn').textContent = 'Nhập IP ESP32'; return; }
+  if (isFile && !BASE) { $('conn').textContent = 'Nhập IP ESP32'; $('conn').className = 'badge idle'; return; }
   try {
     const s = await api('/api/state');
     failCount = 0;
-    $('conn').textContent = 'Đã kết nối'; $('conn').className = 'badge on';
+    $('conn').textContent = 'Đã kết nối ' + (BASE ? BASE.replace('http://', '') : ''); $('conn').className = 'badge on';
     render(s);
   } catch (e) {
-    if (++failCount >= 2) { $('conn').textContent = 'Mất kết nối'; $('conn').className = 'badge off'; }
+    if (++failCount >= 2) {
+      $('conn').textContent = 'Mất kết nối – kiểm tra IP ESP32'; $('conn').className = 'badge off';
+      $('ipbox').style.display = 'flex';                       // cho phép nhập IP ESP32
+      if (!triedSaved && saved) { BASE = saved; triedSaved = true; failCount = 0; }   // thử IP đã lưu
+    }
   }
 }
 async function relay(ch, on) {
