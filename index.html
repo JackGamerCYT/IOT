@@ -4,17 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Đồ án 1 – Giám sát môi trường</title>
+<!-- Thư viện MQTT cho trình duyệt (kết nối HiveMQ qua WebSocket) -->
+<script src="https://unpkg.com/mqtt@5.16.0/dist/mqtt.min.js"></script>
 <style>
   :root{--bg:#0f172a;--card:#1e293b;--line:#334155;--txt:#e2e8f0;--mut:#94a3b8;
         --ok:#10b981;--bad:#ef4444;--warn:#f59e0b;--acc:#38bdf8;}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.45 system-ui,Segoe UI,Roboto,Arial,sans-serif}
   .wrap{max-width:1100px;margin:auto;padding:16px}
-  header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:14px}
+  header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px}
   h1{font-size:20px;margin:0;color:var(--acc)}
   .sub{color:var(--mut);font-size:13px}
   .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:600;font-size:13px}
-  .on{background:#064e3b;color:#6ee7b7}.off{background:#450a0a;color:#fca5a5}.idle{background:#334155;color:#cbd5e1}
+  .on{background:#064e3b;color:#6ee7b7}.off{background:#450a0a;color:#fca5a5}.idle{background:#334155;color:#cbd5e1}.wait{background:#451a03;color:#fcd34d}
   .grid{display:grid;gap:12px}
   .g5{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
   .g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
@@ -26,16 +28,16 @@
   h2{font-size:16px;margin:18px 0 8px}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   button{border:0;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;color:#fff}
-  .bOn{background:#059669}.bOff{background:#dc2626}.bSave{background:#0284c7}
-  button:disabled{opacity:.5;cursor:default}
+  .bOn{background:#059669}.bOff{background:#dc2626}.bSave{background:#0284c7}.bGhost{background:#334155}
   .switch{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
   .switch input{width:18px;height:18px}
   canvas{width:100%;height:90px;display:block}
   label.f{display:flex;flex-direction:column;font-size:13px;color:var(--mut);gap:4px}
   input[type=number],input[type=text]{background:#0b1220;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px;width:100%}
   .cfg{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
-  #log{font:12px/1.5 Consolas,monospace;max-height:180px;overflow:auto;color:#cbd5e1}
-  #ipbox{display:none}
+  #log{font:12px/1.5 Consolas,monospace;max-height:200px;overflow:auto;color:#cbd5e1}
+  #connBox{display:none;margin-bottom:12px}
+  .req{font-size:12px;margin-top:6px;min-height:16px}
   footer{color:var(--mut);font-size:12px;margin-top:16px}
 </style>
 </head>
@@ -44,13 +46,24 @@
   <header>
     <div>
       <h1>Đồ án 1 – Giám sát môi trường &amp; điều khiển thiết bị</h1>
-      <div class="sub">ESP32 · DHT22 · BH1750 · MQ-135 · PIR · Relay 2 kênh</div>
+      <div class="sub">ESP32 · DHT22 · BH1750 · MQ-135 · PIR · Relay 2 kênh · MQTT HiveMQ</div>
     </div>
     <div class="row">
-      <span id="ipbox" class="row"><button class="bSave" onclick="discover(true)">Tự tìm ESP32</button><input id="ip" type="text" placeholder="hoặc nhập IP, vd 192.168.1.50" style="width:200px"><button class="bSave" onclick="setIp()">Kết nối</button></span>
-      <span id="conn" class="badge idle">Đang kết nối…</span>
+      <span class="sub">Broker</span><span id="bBroker" class="badge idle">…</span>
+      <span class="sub">Thiết bị</span><span id="bDev" class="badge idle">?</span>
+      <span class="sub">Dữ liệu</span><span id="bData" class="badge idle">chưa có</span>
+      <button class="bGhost" onclick="toggleConn()">⚙</button>
     </div>
   </header>
+
+  <div class="card" id="connBox">
+    <div class="cfg">
+      <label class="f">Topic gốc (PHẢI trùng TOPIC_BASE trong firmware)<input type="text" id="cTopic"></label>
+      <label class="f">Broker WebSocket<input type="text" id="cBroker"></label>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="bSave" onclick="saveConn()">Lưu &amp; kết nối lại</button>
+      <span class="note">Mặc định: wss://broker.hivemq.com:8884/mqtt · topic doan1_node7391</span></div>
+  </div>
 
   <div class="grid g5">
     <div class="card"><div class="lbl">Nhiệt độ</div><div class="val"><span id="t">--</span> <span class="unit">°C</span></div><div class="note" id="tN"></div></div>
@@ -62,30 +75,32 @@
 
   <h2>Điều khiển thiết bị</h2>
   <div class="grid g2">
-    <div class="card" id="r1card">
+    <div class="card">
       <div class="row" style="justify-content:space-between">
         <div><b>Relay 1 · Đèn</b><div class="note">GPIO 25 · tự bật khi có người và trời tối</div></div>
         <span id="r1" class="badge idle">--</span>
       </div>
       <div class="row" style="margin-top:10px;justify-content:space-between">
-        <label class="switch"><input type="checkbox" id="a1" onchange="setAuto(1,this.checked)"> Tự động (AUTO)</label>
-        <div class="row"><button class="bOn" onclick="relay(1,1)">BẬT</button><button class="bOff" onclick="relay(1,0)">TẮT</button></div>
+        <label class="switch"><input type="checkbox" id="a1" onchange="send('auto1', this.checked ? 'ON' : 'OFF')"> Tự động (AUTO)</label>
+        <div class="row"><button class="bOn" onclick="send('relay1','ON')">BẬT</button><button class="bOff" onclick="send('relay1','OFF')">TẮT</button></div>
       </div>
       <div class="note" id="why1"></div>
+      <div class="req" id="q1"></div>
     </div>
-    <div class="card" id="r2card">
+    <div class="card">
       <div class="row" style="justify-content:space-between">
         <div><b>Relay 2 · Quạt / thông gió</b><div class="note">GPIO 26 · tự bật khi nóng hoặc không khí kém</div></div>
         <span id="r2" class="badge idle">--</span>
       </div>
       <div class="row" style="margin-top:10px;justify-content:space-between">
-        <label class="switch"><input type="checkbox" id="a2" onchange="setAuto(2,this.checked)"> Tự động (AUTO)</label>
-        <div class="row"><button class="bOn" onclick="relay(2,1)">BẬT</button><button class="bOff" onclick="relay(2,0)">TẮT</button></div>
+        <label class="switch"><input type="checkbox" id="a2" onchange="send('auto2', this.checked ? 'ON' : 'OFF')"> Tự động (AUTO)</label>
+        <div class="row"><button class="bOn" onclick="send('relay2','ON')">BẬT</button><button class="bOff" onclick="send('relay2','OFF')">TẮT</button></div>
       </div>
       <div class="note" id="why2"></div>
+      <div class="req" id="q2"></div>
     </div>
   </div>
-  <div class="note">Bấm BẬT/TẮT sẽ chuyển relay đó sang chế độ tay (MANUAL). Tick “Tự động” để giao lại cho mạch tự điều khiển.</div>
+  <div class="note">“Yêu cầu” = lệnh web vừa gửi · “Xác nhận” = ESP32 đã áp dụng và báo lại. Bấm BẬT/TẮT sẽ chuyển relay đó sang MANUAL; tick “Tự động” để giao lại cho mạch.</div>
 
   <h2>Đồ thị 5 phút gần nhất</h2>
   <div class="grid g2">
@@ -103,24 +118,7 @@
       <label class="f">Bật quạt khi nhiệt độ từ (°C)<input type="number" id="cTon" min="10" max="60" step="0.5"></label>
       <label class="f">Bật quạt khi MQ-135 từ (ADC 0–4095)<input type="number" id="cGas" min="100" max="4095" step="10"></label>
     </div>
-    <div class="row" style="margin-top:12px"><button class="bSave" onclick="saveCfg()">Lưu cài đặt</button><span class="note" id="cfgMsg"></span></div>
-  </div>
-
-  <h2>Kết nối WiFi</h2>
-  <div class="card">
-    <div id="apInfo" class="note" style="font-size:14px">--</div>
-    <div id="staInfo" class="note" style="font-size:14px;margin-top:4px">--</div>
-    <div class="cfg" style="margin-top:12px">
-      <label class="f">WiFi nhà (tuỳ chọn)<select id="wSsid" style="background:#0b1220;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px"><option value="">— bấm Quét WiFi —</option></select></label>
-      <label class="f">Mật khẩu (để trống nếu WiFi mở)<input type="text" id="wPass" autocomplete="off"></label>
-    </div>
-    <div class="row" style="margin-top:12px">
-      <button class="bSave" onclick="scanWifi()">Quét WiFi</button>
-      <button class="bOn" onclick="joinWifi()">Vào WiFi này</button>
-      <button class="bOff" onclick="forgetWifi()">Bỏ WiFi nhà</button>
-      <span class="note" id="wMsg"></span>
-    </div>
-    <div class="note" style="margin-top:8px">Không bắt buộc. Không cài WiFi nhà thì cứ vào WiFi do ESP32 phát là dùng được ngay. Cài WiFi nhà để mở trang từ máy đang dùng mạng nhà (trang sẽ tự dò IP của ESP32).</div>
+    <div class="row" style="margin-top:12px"><button class="bSave" onclick="saveCfg()">Gửi cài đặt</button><span class="req" id="q0"></span></div>
   </div>
 
   <h2>Nhật ký</h2>
@@ -130,86 +128,100 @@
 </div>
 
 <script>
-// Kết nối: trang do ESP32 phát -> gọi cùng địa chỉ. Mở file index.html trên máy tính, hoặc gọi
-// thất bại -> TỰ DÒ ESP32: IP đã lưu, doan1.local, 192.168.4.1 (WiFi do ESP32 phát), rồi quét mạng LAN.
-const isFile = !location.protocol.startsWith('http');
+// ===================== CẤU HÌNH KẾT NỐI (phải trùng firmware) =====================
+const DEF_BROKER = 'wss://broker.hivemq.com:8884/mqtt';
+const DEF_TOPIC  = 'doan1_node7391';
 const qs = new URLSearchParams(location.search);
-const PORT = qs.get('port') ? ':' + qs.get('port') : '';           // chỉ dùng khi thử với bộ giả lập
-let saved = '';
-try { saved = localStorage.getItem('esp_ip') || ''; } catch (e) {}
-if (qs.get('ip')) saved = qs.get('ip').startsWith('http') ? qs.get('ip') : 'http://' + qs.get('ip');
-let BASE = isFile ? null : '';          // null = chưa biết ESP32 ở đâu
-let searching = false;
-document.getElementById('ip').value = saved.replace('http://', '');
-
-function useBase(b) {
-  BASE = b; failCount = 0;
-  if (b) { try { localStorage.setItem('esp_ip', b); } catch (e) {} saved = b; }
-  document.getElementById('ip').value = (b || '').replace('http://', '');
-  poll();
-}
-function setIp() {
-  let v = document.getElementById('ip').value.trim();
-  if (!v) return discover(true);
-  if (!v.startsWith('http')) v = 'http://' + v;
-  useBase(v.replace(/\/$/, ''));
-}
-async function probe(base, ms) {        // có phải ESP32 của đồ án không?
-  const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), ms);
-  try { const r = await fetch(base + '/api/id', { signal: ctl.signal }); const j = await r.json(); return j.dev === 'doan1' ? base : null; }
-  catch (e) { return null; } finally { clearTimeout(tm); }
-}
-async function discover(manual) {
-  if (searching) return;
-  searching = true;
-  const conn = document.getElementById('conn');
-  document.getElementById('ipbox').style.display = 'flex';
-  const show = t => { conn.textContent = t; conn.className = 'badge idle'; };
-  try {
-    const first = [];
-    if (!isFile) first.push(location.origin);
-    if (saved) first.push(saved);
-    first.push('http://doan1.local' + PORT, 'http://192.168.4.1' + PORT);
-    show('Đang tìm ESP32…');
-    for (const c of [...new Set(first)]) { if (await probe(c, 1500)) return useBase(c === location.origin ? '' : c); }
-    const nets = [];
-    if (qs.get('net')) nets.push(qs.get('net'));
-    const m = saved.match(/(\d+\.\d+\.\d+)\.\d+/); if (m) nets.push(m[1]);
-    nets.push('192.168.1', '192.168.0', '192.168.2', '192.168.100', '192.168.31', '10.0.0', '172.20.10');
-    for (const net of [...new Set(nets)]) {
-      for (let start = 1; start <= 254; start += 64) {
-        show('Đang dò ' + net + '.' + start + '–' + Math.min(start + 63, 254) + '…');
-        const batch = [];
-        for (let i = start; i < start + 64 && i <= 254; i++) batch.push(probe('http://' + net + '.' + i + PORT, 1500));
-        const hit = (await Promise.all(batch)).find(x => x);
-        if (hit) return useBase(hit);
-      }
-    }
-    conn.textContent = 'Không tìm thấy ESP32'; conn.className = 'badge off';
-    if (manual) alertMsg('Hãy vào WiFi "DoAn1-ESP32" rồi bấm Tự tìm, hoặc nhập IP trong Serial Monitor');
-  } finally { searching = false; }
-}
+function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+let BROKER = qs.get('broker') || ls('d1_broker') || DEF_BROKER;
+let TOPIC  = qs.get('topic')  || ls('d1_topic')  || DEF_TOPIC;
 
 const $ = id => document.getElementById(id);
-const N = 300;                          // 300 điểm × 1 s = 5 phút
+const N = 150;                          // 150 điểm × 2 s = 5 phút
 const hist = { t: [], h: [], lux: [], gas: [] };
-let cfgLoaded = false, lastEv = -1, failCount = 0;
+let client = null, cfgLoaded = false, lastTele = 0, devStatus = '?', last = null;
+const pending = {};                     // id -> {t0, dev, action, box}
 
-async function api(path, method = 'GET') {
-  const ctl = new AbortController();
-  const tm = setTimeout(() => ctl.abort(), 3000);
-  try {
-    const r = await fetch((BASE || '') + path, { method, signal: ctl.signal });
-    if (!r.ok) throw new Error(r.status);
-    return await r.json();
-  } finally { clearTimeout(tm); }
-}
-
+function setBadge(el, text, cls) { el.textContent = text; el.className = 'badge ' + cls; }
 function fmt(v, d) { return (v === null || v === undefined) ? '--' : Number(v).toFixed(d); }
 function push(arr, v) { arr.push(v); if (arr.length > N) arr.shift(); }
-function badge(el, on) { el.textContent = on ? 'ĐANG BẬT' : 'ĐANG TẮT'; el.className = 'badge ' + (on ? 'on' : 'off'); }
+function relayBadge(el, on) { setBadge(el, on ? 'ĐANG BẬT' : 'ĐANG TẮT', on ? 'on' : 'off'); }
+function toggleConn() { const b = $('connBox'); b.style.display = b.style.display === 'block' ? 'none' : 'block'; }
+function addLog(line) {
+  const el = $('log'); if (el.textContent === 'Chưa có sự kiện.') el.innerHTML = '';
+  const d = document.createElement('div'); d.textContent = line; el.prepend(d);
+  while (el.children.length > 40) el.lastChild.remove();
+}
+
+// ===================== MQTT =====================
+function connect() {
+  $('cTopic').value = TOPIC; $('cBroker').value = BROKER;
+  if (typeof mqtt === 'undefined') { setBadge($('bBroker'), 'Không tải được thư viện MQTT (cần Internet)', 'off'); return; }
+  if (client) { try { client.end(true); } catch (e) {} }
+  setBadge($('bBroker'), 'đang kết nối', 'wait');
+  client = mqtt.connect(BROKER, {
+    clientId: 'doan1_web_' + Math.random().toString(16).slice(2, 10),
+    clean: true, keepalive: 30, reconnectPeriod: 2000, connectTimeout: 10000,
+  });
+  client.on('connect', () => {
+    setBadge($('bBroker'), 'kết nối', 'on');
+    client.subscribe([TOPIC + '/telemetry', TOPIC + '/status', TOPIC + '/event', TOPIC + '/ack'], { qos: 0 });
+  });
+  client.on('reconnect', () => setBadge($('bBroker'), 'đang kết nối lại', 'wait'));
+  client.on('offline', () => setBadge($('bBroker'), 'mất kết nối', 'off'));
+  client.on('error', e => setBadge($('bBroker'), 'lỗi: ' + (e && e.message ? e.message : e), 'off'));
+  client.on('message', (topic, buf) => {
+    const msg = buf.toString(), sub = topic.slice(TOPIC.length + 1);
+    if (sub === 'status') { devStatus = msg; renderStatus(); return; }
+    let d; try { d = JSON.parse(msg); } catch (e) { return; }
+    if (sub === 'telemetry') { lastTele = Date.now(); if (devStatus !== 'online') { devStatus = 'online'; } renderStatus(); render(d); }
+    else if (sub === 'event') addLog((d.time || '') + '  ' + d.detail);
+    else if (sub === 'ack') onAck(d);
+  });
+}
+function saveConn() {
+  TOPIC = $('cTopic').value.trim() || DEF_TOPIC; BROKER = $('cBroker').value.trim() || DEF_BROKER;
+  ls('d1_topic', TOPIC); ls('d1_broker', BROKER);
+  devStatus = '?'; lastTele = 0; connect();
+}
+
+function send(device, action, extra) {
+  if (!client || !client.connected) { alert('Chưa kết nối broker MQTT'); return; }
+  const id = Math.random().toString(36).slice(2, 10);
+  const box = device === 'config' ? 'q0' : (device.endsWith('1') ? 'q1' : 'q2');
+  const cmd = Object.assign({ id, device, action: action || '', ts: Date.now() }, extra || {});
+  pending[id] = { t0: performance.now(), device, action, box };
+  const label = device.startsWith('relay') ? (action === 'ON' ? 'BẬT' : 'TẮT') : device.startsWith('auto') ? (action === 'ON' ? 'AUTO' : 'MANUAL') : 'cài đặt';
+  $(box).innerHTML = '<span class="badge wait">Yêu cầu: ' + label + '</span> <span class="note">đang chờ ESP32 xác nhận…</span>';
+  client.publish(TOPIC + '/command', JSON.stringify(cmd), { qos: 1 });
+  setTimeout(() => {
+    if (pending[id]) { delete pending[id]; $(box).innerHTML = '<span class="badge off">Chưa xác nhận sau 5 s</span> <span class="note">ESP32 offline hoặc sai topic</span>'; }
+  }, 5000);
+}
+function onAck(a) {
+  const p = pending[a.id]; if (!p) return;
+  delete pending[a.id];
+  const ms = Math.round(performance.now() - p.t0);
+  $(p.box).innerHTML = (a.ok ? '<span class="badge on">Xác nhận</span> ' : '<span class="badge off">Từ chối</span> ') +
+    '<span class="note">' + (a.msg || '') + ' · sau ' + ms + ' ms</span>';
+  if (p.device === 'config') cfgLoaded = false;
+}
+
+// ===================== HIỂN THỊ =====================
+function renderStatus() {
+  if (devStatus === 'online') setBadge($('bDev'), 'ONLINE', 'on');
+  else if (devStatus === 'offline') setBadge($('bDev'), 'OFFLINE', 'off');
+  else setBadge($('bDev'), '?', 'idle');
+}
+setInterval(() => {                       // độ tươi dữ liệu
+  if (!lastTele) return;
+  const s = Math.round((Date.now() - lastTele) / 1000);
+  if (s <= 6) setBadge($('bData'), 'vừa cập nhật', 'on');
+  else setBadge($('bData'), s + ' s trước', s > 30 ? 'off' : 'wait');
+}, 1000);
 
 function render(s) {
+  last = s;
   $('t').textContent = fmt(s.t, 1);
   $('h').textContent = fmt(s.h, 1);
   $('lux').textContent = fmt(s.lux, 0);
@@ -225,7 +237,7 @@ function render(s) {
   $('mot').style.color = s.motion ? 'var(--warn)' : 'var(--txt)';
   $('motN').textContent = s.motionAgo < 0 ? 'Chưa phát hiện lần nào' : 'Lần cuối: ' + s.motionAgo + ' s trước';
 
-  badge($('r1'), s.r1); badge($('r2'), s.r2);
+  relayBadge($('r1'), s.r1); relayBadge($('r2'), s.r2);
   $('a1').checked = !!s.a1; $('a2').checked = !!s.a2;
   $('why1').textContent = (s.a1 ? 'AUTO: ' : 'MANUAL: ') + s.why1;
   $('why2').textContent = (s.a2 ? 'AUTO: ' : 'MANUAL: ') + s.why2;
@@ -235,18 +247,10 @@ function render(s) {
     $('cTon').value = s.cfg.tOn;   $('cGas').value = s.cfg.gasOn;
     cfgLoaded = true;
   }
-  if (s.evn !== lastEv) {
-    lastEv = s.evn;
-    $('log').innerHTML = s.ev.length ? s.ev.map(e => '<div>' + e.replace(/</g, '&lt;') + '</div>').join('') : 'Chưa có sự kiện.';
-  }
-  if (s.apSsid) {
-    $('apInfo').innerHTML = '📶 ESP32 phát WiFi <b>' + s.apSsid + '</b> (không mật khẩu) → mở <b>http://' + s.apIp + '</b>';
-    $('staInfo').innerHTML = !s.staSsid ? '🏠 WiFi nhà: chưa cài' : (s.staOk ? '🏠 Đã vào WiFi nhà <b>' + s.staSsid +
-      '</b> → trong mạng nhà mở <b>http://' + s.staIp + '</b> (' + s.rssi + ' dBm)' : '🏠 Đang thử vào WiFi nhà <b>' + s.staSsid + '</b>… (sai mật khẩu hoặc WiFi 5 GHz sẽ không vào được)');
-  }
+  if (s.ev && $('log').textContent === 'Chưa có sự kiện.') s.ev.slice().reverse().forEach(addLog);
   const up = s.uptime, hh = Math.floor(up / 3600), mm = Math.floor(up % 3600 / 60);
-  $('foot').textContent = 'IP ' + s.ip + ' · WiFi ' + s.mode + (s.rssi ? ' (' + s.rssi + ' dBm)' : '') +
-                          ' · Giờ ' + s.clock + ' · Chạy được ' + hh + ' giờ ' + mm + ' phút';
+  $('foot').textContent = s.dev + ' · FW ' + s.fw + ' · WiFi ' + s.ssid + ' (' + s.rssi + ' dBm, IP ' + s.ip + ') · Giờ ' + s.clock +
+                          ' · Chạy được ' + hh + ' giờ ' + mm + ' phút · gói #' + s.seq + ' · topic ' + TOPIC;
 
   push(hist.t, s.t); push(hist.h, s.h); push(hist.lux, s.lux); push(hist.gas, s.gas);
   draw('cT', hist.t, '#f59e0b', s.cfg.tOn);
@@ -255,7 +259,7 @@ function render(s) {
   draw('cH', hist.h, '#34d399', null);
 }
 
-// Vẽ đồ thị đường đơn giản (không cần thư viện, chạy được khi không có Internet)
+// Vẽ đồ thị đường đơn giản (không cần thư viện)
 function draw(id, data, color, limit) {
   const c = $(id), dpr = window.devicePixelRatio || 1;
   const w = c.clientWidth, h = c.clientHeight;
@@ -284,52 +288,11 @@ function draw(id, data, color, limit) {
   g.stroke();
 }
 
-async function poll() {
-  if (BASE === null) { if (!searching) discover(false); return; }
-  try {
-    const st = await api('/api/state');
-    failCount = 0;
-    $('conn').textContent = 'Đã kết nối ' + (BASE ? BASE.replace('http://', '') : ''); $('conn').className = 'badge on';
-    if (BASE) $('ipbox').style.display = 'flex';
-    render(st);
-  } catch (e) {
-    if (++failCount === 3) { $('conn').textContent = 'Mất kết nối'; $('conn').className = 'badge off'; discover(false); }
-  }
-}
-async function relay(ch, on) {
-  try { render(await api('/api/relay?ch=' + ch + '&on=' + on, 'POST')); } catch (e) { alertMsg('Không gửi được lệnh'); }
-}
-async function setAuto(ch, on) {
-  try { render(await api('/api/auto?ch=' + ch + '&on=' + (on ? 1 : 0), 'POST')); } catch (e) { alertMsg('Không gửi được lệnh'); }
-}
-async function saveCfg() {
-  const q = 'luxOn=' + $('cLux').value + '&hold=' + $('cHold').value + '&tOn=' + $('cTon').value + '&gasOn=' + $('cGas').value;
-  try { cfgLoaded = false; render(await api('/api/config?' + q, 'POST')); $('cfgMsg').textContent = 'Đã lưu vào ESP32'; }
-  catch (e) { $('cfgMsg').textContent = 'Lưu thất bại'; }
-  setTimeout(() => $('cfgMsg').textContent = '', 3000);
-}
-function alertMsg(m) { $('cfgMsg').textContent = m; setTimeout(() => $('cfgMsg').textContent = '', 3000); }
-
-async function scanWifi() {
-  $('wMsg').textContent = 'Đang quét…';
-  try {
-    const list = await api('/api/wifi/scan');
-    $('wSsid').innerHTML = list.length ? list.map(w => '<option value="' + w.ssid.replace(/"/g, '&quot;') + '">' +
-      w.ssid.replace(/</g, '&lt;') + ' (' + w.rssi + ' dBm' + (w.open ? ', mở' : '') + ')</option>').join('') : '<option value="">Không thấy WiFi nào</option>';
-    $('wMsg').textContent = 'Tìm thấy ' + list.length + ' mạng';
-  } catch (e) { $('wMsg').textContent = 'Quét thất bại'; }
-}
-async function joinWifi() {
-  const ss = $('wSsid').value; if (!ss) { $('wMsg').textContent = 'Chọn WiFi trước (bấm Quét WiFi)'; return; }
-  try { render(await api('/api/wifi?ssid=' + encodeURIComponent(ss) + '&pass=' + encodeURIComponent($('wPass').value), 'POST'));
-        $('wMsg').textContent = 'Đang vào WiFi, chờ khoảng 10 s…'; } catch (e) { $('wMsg').textContent = 'Gửi thất bại'; }
-}
-async function forgetWifi() {
-  try { render(await api('/api/wifi/forget', 'POST')); $('wMsg').textContent = 'Đã bỏ WiFi nhà'; } catch (e) { $('wMsg').textContent = 'Gửi thất bại'; }
+function saveCfg() {
+  send('config', '', { luxOn: +$('cLux').value, hold: +$('cHold').value, tOn: +$('cTon').value, gasOn: +$('cGas').value });
 }
 
-poll();
-setInterval(poll, 1000);
+connect();
 </script>
 </body>
 </html>

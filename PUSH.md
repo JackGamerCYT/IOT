@@ -27,3 +27,11 @@ git push
 1. Vào repo trên github.com → **Add file → Upload files**.
 2. Kéo **cả thư mục** `firmware`, `tools`, `docs` và các file `index.html`, `README.md`, `.gitignore` vào.
 3. Kiểm tra không có `secrets.h` (chứa mật khẩu WiFi), rồi bấm **Commit changes**.
+
+## Đưa dashboard lên mạng (mở bằng điện thoại ở bất cứ đâu)
+
+**Vercel**: vercel.com → *Add New → Project* → chọn repo → *Deploy* (không cần cấu hình gì; `index.html` ở gốc repo nên Vercel phục vụ ngay tại `/`).
+
+**GitHub Pages**: repo → *Settings → Pages* → *Source: Deploy from a branch* → `main` / `(root)` → *Save*. Sau 1–2 phút có link `https://<tai-khoan>.github.io/<ten-repo>/`.
+
+Trang chạy trên `https` vẫn kết nối được vì web dùng `wss://broker.hivemq.com:8884/mqtt`.
