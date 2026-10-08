@@ -1,11 +1,11 @@
 # 🌿 Đồ án 1 — Giám sát môi trường & điều khiển thiết bị (ESP32 + MQTT HiveMQ)
 
-ESP32 đọc nhiệt độ, độ ẩm (DHT22), ánh sáng (BH1750), chất lượng không khí (MQ-135) và chuyển động (PIR), tự bật/tắt **đèn** và **quạt** qua module relay 2 kênh, gửi số liệu lên **broker MQTT HiveMQ**. Trang web (`index.html`) nối vào cùng broker qua WebSocket nên **không cần biết IP của ESP32** — ESP32 và máy xem web ở hai mạng khác nhau vẫn điều khiển được, miễn là cả hai có Internet.
+ESP32 đọc nhiệt độ và độ ẩm không khí (DHT22), ánh sáng (BH1750), chuyển động (PIR HC-SR501 + radar RCWL-0516), tự bật/tắt **đèn** và **quạt** qua module relay 2 kênh, gửi số liệu lên **broker MQTT HiveMQ**. Trang web (`index.html`) nối vào cùng broker qua WebSocket nên **không cần biết IP của ESP32** — ESP32 và máy xem web ở hai mạng khác nhau vẫn điều khiển được, miễn là cả hai có Internet.
 
 ```
- DHT22 ─GPIO14 ┐                                   ┌──────────────────────────────┐
- PIR   ─GPIO12 ┤   Wi-Fi     MQTT 1883             │ index.html (máy tính, điện    │
- MQ135 ─GPIO35 ┼─ ESP32 ───────────────> broker.hivemq.com <──── WSS 8884 ──── thoại, Vercel, GitHub Pages)│
+ DHT22 ─GPIO13 ┐                                   ┌──────────────────────────────┐
+ PIR   ─GPIO27 ┤   Wi-Fi     MQTT 1883             │ index.html (máy tính, điện    │
+ RCWL  ─GPIO14 ┼─ ESP32 ───────────────> broker.hivemq.com <──── WSS 8884 ──── thoại, Vercel, GitHub Pages)│
  BH1750─21/22  ┤   doan1_node7391/telemetry, status, event  →   realtime, đồ thị, nhật ký   │
  Relay ─25/26  ┘   doan1_node7391/command  ←  web gửi lệnh  ;  ack → web hiện "Xác nhận"   │
                                                    └──────────────────────────────┘
@@ -58,9 +58,9 @@ DO-AN1-CODE/
 
 | Linh kiện | Chân | ESP32 | Ghi chú |
 |---|---|---|---|
-| DHT22 | DATA | **GPIO 14** | Nên cấp 3,3 V |
-| PIR HC-SR501 | OUT | **GPIO 12** | Chân strapping — xem `docs/WIRING.md` |
-| MQ-135 | AO | **GPIO 35** | AO tới 5 V → phân áp 10 kΩ/20 kΩ, `MQ_DIVIDER = 0.667` |
+| DHT22 | DATA | **GPIO 13** | Nhiệt độ + độ ẩm không khí; nên cấp 3,3 V |
+| PIR HC-SR501 | OUT | **GPIO 27** | Hồng ngoại, cần ~30–60 s ổn định sau khi cấp điện |
+| RCWL-0516 | OUT | **GPIO 14** | Radar vi sóng; OUT 3,3 V, cấp VIN 4–28 V |
 | BH1750 | SDA / SCL | **GPIO 21 / 22** | I2C 0x23 |
 | Relay 2 kênh | IN1 / IN2 | **GPIO 25 / 26** | Kích mức THẤP; IN1 = đèn, IN2 = quạt |
 
@@ -68,8 +68,10 @@ DO-AN1-CODE/
 
 | Relay | Bật khi | Tắt khi | Chống đóng cắt liên tục |
 |---|---|---|---|
-| **1 – Đèn** | PIR có người **và** ánh sáng < `luxOn` (50 lux) | Không có chuyển động trong `hold` giây (30 s) | Đèn đã bật thì **bỏ qua cảm biến ánh sáng** |
-| **2 – Quạt** | Nhiệt độ ≥ `tOn` (32 °C) **hoặc** MQ-135 ≥ `gasOn` (2000) | Nhiệt độ ≤ `tOn − 1` **và** MQ-135 ≤ `gasOn − 200` | Dải trễ + chạy tối thiểu 10 s; bỏ qua MQ-135 60 s đầu |
+| **1 – Đèn** | **Có người** (theo `mMode`) **và** ánh sáng < `luxOn` (50 lux) | Không có chuyển động trong `hold` giây (30 s) | Đèn đã bật thì **bỏ qua cảm biến ánh sáng**; 30 s đầu sau khi cấp điện chưa bật (PIR đang ổn định) |
+| **2 – Quạt** | Nhiệt độ ≥ `tOn` (32 °C) **hoặc** độ ẩm ≥ `hOn` (85 %) | Nhiệt độ ≤ `tOn − 1` **và** độ ẩm ≤ `hOn − 3` | Dải trễ + chạy tối thiểu 10 s. Đặt `hOn = 100` để chỉ dùng nhiệt độ |
+
+`mMode` – cảm biến dùng để biết "có người": **0** PIR hoặc RCWL (nhạy nhất, mặc định) · **1** chỉ PIR · **2** chỉ RCWL · **3** PIR và RCWL cùng báo trong 5 s (ít báo nhầm nhất; RCWL có thể bị quạt đang quay làm báo nhầm).
 
 Mỗi relay có AUTO riêng. Bấm BẬT/TẮT trên web → relay đó sang MANUAL. Ngưỡng đổi trên web, lưu Flash.
 
@@ -89,14 +91,14 @@ Gốc topic `TOPIC_BASE` (mặc định `doan1_node7391`), broker `broker.hivemq
 |---|---|---|
 | `relay1`, `relay2` | `ON` / `OFF` | Bật/tắt tay, relay đó sang MANUAL |
 | `auto1`, `auto2` | `ON` / `OFF` | Bật/tắt chế độ AUTO |
-| `config` | `luxOn`, `hold`, `tOn`, `gasOn` | Đổi ngưỡng, lưu Flash |
+| `config` | `luxOn`, `hold`, `tOn`, `hOn`, `mMode` | Đổi ngưỡng, lưu Flash |
 | `ping` | — | Trả `pong` (thử kết nối) |
 
 Ví dụ telemetry:
 ```json
-{"dev":"doan1-A1B2C3","fw":"2.0.0","seq":120,"ts":1791530000000,"t":29.4,"h":68.2,"lux":35.0,"gas":1640,
- "gasV":1.238,"warm":0,"motion":1,"motionAgo":0,"r1":1,"a1":1,"why1":"Có người, trời tối (35 lux)",
- "r2":0,"a2":1,"why2":"Nhiệt độ và không khí bình thường","cfg":{"luxOn":50,"hold":30,"tOn":32.0,"gasOn":2000},
+{"dev":"doan1-A1B2C3","fw":"2.1.0","seq":120,"ts":1791530000000,"t":29.4,"h":68.2,"lux":35.0,
+ "warm":0,"pir":1,"rcwl":1,"motion":1,"motionAgo":0,"r1":1,"a1":1,"why1":"Có người, trời tối (35 lux)",
+ "r2":0,"a2":1,"why2":"Nhiệt độ và độ ẩm bình thường","cfg":{"luxOn":50,"hold":30,"tOn":32.0,"hOn":85,"mMode":0},
  "evn":7,"ev":["14:02:11  Đèn BẬT – Có người, trời tối (35 lux)"],"ip":"192.168.1.50","ssid":"WiFi-Nha",
  "rssi":-58,"clock":"14:02:12","uptime":3600}
 ```

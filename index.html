@@ -18,7 +18,9 @@
   .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:600;font-size:13px}
   .on{background:#064e3b;color:#6ee7b7}.off{background:#450a0a;color:#fca5a5}.idle{background:#334155;color:#cbd5e1}.wait{background:#451a03;color:#fcd34d}
   .grid{display:grid;gap:12px}
-  .g5{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+  .g5{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#475569;margin-right:4px}.dot.hit{background:var(--warn)}
+  select{background:#0b1220;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px;width:100%}
   .g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
   .lbl{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
@@ -46,7 +48,7 @@
   <header>
     <div>
       <h1>Đồ án 1 – Giám sát môi trường &amp; điều khiển thiết bị</h1>
-      <div class="sub">ESP32 · DHT22 · BH1750 · MQ-135 · PIR · Relay 2 kênh · MQTT HiveMQ</div>
+      <div class="sub">ESP32 · DHT22 · BH1750 · PIR · RCWL-0516 · Relay 2 kênh · MQTT HiveMQ</div>
     </div>
     <div class="row">
       <span class="sub">Broker</span><span id="bBroker" class="badge idle">…</span>
@@ -67,17 +69,17 @@
 
   <div class="grid g5">
     <div class="card"><div class="lbl">Nhiệt độ</div><div class="val"><span id="t">--</span> <span class="unit">°C</span></div><div class="note" id="tN"></div></div>
-    <div class="card"><div class="lbl">Độ ẩm</div><div class="val"><span id="h">--</span> <span class="unit">%</span></div><div class="note">DHT22</div></div>
+    <div class="card"><div class="lbl">Độ ẩm không khí</div><div class="val"><span id="h">--</span> <span class="unit">%</span></div><div class="note" id="hN"></div></div>
     <div class="card"><div class="lbl">Ánh sáng</div><div class="val"><span id="lux">--</span> <span class="unit">lux</span></div><div class="note" id="luxN"></div></div>
-    <div class="card"><div class="lbl">Không khí (MQ-135)</div><div class="val"><span id="gas">--</span> <span class="unit">ADC</span></div><div class="note" id="gasN"></div></div>
-    <div class="card"><div class="lbl">Chuyển động (PIR)</div><div class="val" id="mot">--</div><div class="note" id="motN"></div></div>
+    <div class="card"><div class="lbl">Chuyển động</div><div class="val" id="mot">--</div>
+      <div class="note"><span class="dot" id="dPir"></span>PIR &nbsp; <span class="dot" id="dRcwl"></span>RCWL-0516</div><div class="note" id="motN"></div></div>
   </div>
 
   <h2>Điều khiển thiết bị</h2>
   <div class="grid g2">
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <div><b>Relay 1 · Đèn</b><div class="note">GPIO 25 · tự bật khi có người và trời tối</div></div>
+        <div><b>Relay 1 · Đèn</b><div class="note">GPIO 25 · tự bật khi có người (PIR / RCWL) và trời tối</div></div>
         <span id="r1" class="badge idle">--</span>
       </div>
       <div class="row" style="margin-top:10px;justify-content:space-between">
@@ -89,7 +91,7 @@
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <div><b>Relay 2 · Quạt / thông gió</b><div class="note">GPIO 26 · tự bật khi nóng hoặc không khí kém</div></div>
+        <div><b>Relay 2 · Quạt / thông gió</b><div class="note">GPIO 26 · tự bật khi nóng hoặc ẩm (DHT22)</div></div>
         <span id="r2" class="badge idle">--</span>
       </div>
       <div class="row" style="margin-top:10px;justify-content:space-between">
@@ -106,7 +108,6 @@
   <div class="grid g2">
     <div class="card"><div class="lbl">Nhiệt độ (°C)</div><canvas id="cT"></canvas></div>
     <div class="card"><div class="lbl">Ánh sáng (lux)</div><canvas id="cL"></canvas></div>
-    <div class="card"><div class="lbl">Không khí MQ-135 (ADC)</div><canvas id="cG"></canvas></div>
     <div class="card"><div class="lbl">Độ ẩm (%)</div><canvas id="cH"></canvas></div>
   </div>
 
@@ -116,7 +117,8 @@
       <label class="f">Trời tối khi ánh sáng dưới (lux)<input type="number" id="cLux" min="0" max="65000" step="1"></label>
       <label class="f">Giữ đèn sau lần chuyển động cuối (giây)<input type="number" id="cHold" min="5" max="3600" step="1"></label>
       <label class="f">Bật quạt khi nhiệt độ từ (°C)<input type="number" id="cTon" min="10" max="60" step="0.5"></label>
-      <label class="f">Bật quạt khi MQ-135 từ (ADC 0–4095)<input type="number" id="cGas" min="100" max="4095" step="10"></label>
+      <label class="f">Bật quạt khi độ ẩm từ (%) – 100 = tắt luật này<input type="number" id="cHon" min="30" max="100" step="1"></label>
+      <label class="f">Cảm biến chuyển động để bật đèn<select id="cMode"><option value="0">PIR hoặc RCWL (nhạy nhất)</option><option value="1">Chỉ PIR</option><option value="2">Chỉ RCWL-0516</option><option value="3">PIR và RCWL cùng báo (ít báo nhầm)</option></select></label>
     </div>
     <div class="row" style="margin-top:12px"><button class="bSave" onclick="saveCfg()">Gửi cài đặt</button><span class="req" id="q0"></span></div>
   </div>
@@ -138,9 +140,10 @@ let TOPIC  = qs.get('topic')  || ls('d1_topic')  || DEF_TOPIC;
 
 const $ = id => document.getElementById(id);
 const N = 150;                          // 150 điểm × 2 s = 5 phút
-const hist = { t: [], h: [], lux: [], gas: [] };
+const hist = { t: [], h: [], lux: [] };
 let client = null, cfgLoaded = false, lastTele = 0, devStatus = '?', last = null;
-const pending = {};                     // id -> {t0, dev, action, box}
+const pending = {};
+const MMODE = ['PIR hoặc RCWL', 'chỉ PIR', 'chỉ RCWL', 'PIR và RCWL'];                     // id -> {t0, dev, action, box}
 
 function setBadge(el, text, cls) { el.textContent = text; el.className = 'badge ' + cls; }
 function fmt(v, d) { return (v === null || v === undefined) ? '--' : Number(v).toFixed(d); }
@@ -225,17 +228,14 @@ function render(s) {
   $('t').textContent = fmt(s.t, 1);
   $('h').textContent = fmt(s.h, 1);
   $('lux').textContent = fmt(s.lux, 0);
-  $('gas').textContent = fmt(s.gas, 0);
   $('tN').textContent = s.t === null ? 'Lỗi đọc DHT22' : (s.t >= s.cfg.tOn ? 'Nóng – vượt ngưỡng ' + s.cfg.tOn + ' °C' : 'Ngưỡng bật quạt ' + s.cfg.tOn + ' °C');
   $('luxN').textContent = s.lux === null ? 'Lỗi đọc BH1750' : (s.lux < s.cfg.luxOn ? 'Tối (dưới ' + s.cfg.luxOn + ' lux)' : 'Sáng');
-  if (s.warm > 0) $('gasN').textContent = 'Đang làm nóng cảm biến, còn ' + s.warm + ' s';
-  else {
-    const lvl = s.gas >= s.cfg.gasOn ? 'Kém' : (s.gas >= s.cfg.gasOn * 0.75 ? 'Trung bình' : 'Tốt');
-    $('gasN').textContent = lvl + ' · ' + fmt(s.gasV, 2) + ' V';
-  }
+  $('hN').textContent = s.h === null ? 'Lỗi đọc DHT22' : (s.h >= s.cfg.hOn ? 'Ẩm – vượt ngưỡng ' + s.cfg.hOn + ' %' : (s.cfg.hOn >= 100 ? 'DHT22 · luật độ ẩm đang tắt' : 'Ngưỡng bật quạt ' + s.cfg.hOn + ' %'));
   $('mot').textContent = s.motion ? 'CÓ NGƯỜI' : 'Không';
   $('mot').style.color = s.motion ? 'var(--warn)' : 'var(--txt)';
-  $('motN').textContent = s.motionAgo < 0 ? 'Chưa phát hiện lần nào' : 'Lần cuối: ' + s.motionAgo + ' s trước';
+  $('dPir').className = 'dot' + (s.pir ? ' hit' : ''); $('dRcwl').className = 'dot' + (s.rcwl ? ' hit' : '');
+  $('motN').textContent = s.warm > 0 ? 'Cảm biến đang ổn định, còn ' + s.warm + ' s' :
+    (s.motionAgo < 0 ? 'Chưa phát hiện lần nào' : 'Lần cuối: ' + s.motionAgo + ' s trước') + ' · ' + MMODE[s.cfg.mMode];
 
   relayBadge($('r1'), s.r1); relayBadge($('r2'), s.r2);
   $('a1').checked = !!s.a1; $('a2').checked = !!s.a2;
@@ -244,7 +244,7 @@ function render(s) {
 
   if (!cfgLoaded) {
     $('cLux').value = s.cfg.luxOn; $('cHold').value = s.cfg.hold;
-    $('cTon').value = s.cfg.tOn;   $('cGas').value = s.cfg.gasOn;
+    $('cTon').value = s.cfg.tOn;   $('cHon').value = s.cfg.hOn;   $('cMode').value = s.cfg.mMode;
     cfgLoaded = true;
   }
   if (s.ev && $('log').textContent === 'Chưa có sự kiện.') s.ev.slice().reverse().forEach(addLog);
@@ -252,11 +252,10 @@ function render(s) {
   $('foot').textContent = s.dev + ' · FW ' + s.fw + ' · WiFi ' + s.ssid + ' (' + s.rssi + ' dBm, IP ' + s.ip + ') · Giờ ' + s.clock +
                           ' · Chạy được ' + hh + ' giờ ' + mm + ' phút · gói #' + s.seq + ' · topic ' + TOPIC;
 
-  push(hist.t, s.t); push(hist.h, s.h); push(hist.lux, s.lux); push(hist.gas, s.gas);
+  push(hist.t, s.t); push(hist.h, s.h); push(hist.lux, s.lux);
   draw('cT', hist.t, '#f59e0b', s.cfg.tOn);
   draw('cL', hist.lux, '#38bdf8', s.cfg.luxOn);
-  draw('cG', hist.gas, '#a78bfa', s.cfg.gasOn);
-  draw('cH', hist.h, '#34d399', null);
+  draw('cH', hist.h, '#34d399', s.cfg.hOn < 100 ? s.cfg.hOn : null);
 }
 
 // Vẽ đồ thị đường đơn giản (không cần thư viện)
@@ -289,7 +288,7 @@ function draw(id, data, color, limit) {
 }
 
 function saveCfg() {
-  send('config', '', { luxOn: +$('cLux').value, hold: +$('cHold').value, tOn: +$('cTon').value, gasOn: +$('cGas').value });
+  send('config', '', { luxOn: +$('cLux').value, hold: +$('cHold').value, tOn: +$('cTon').value, hOn: +$('cHon').value, mMode: +$('cMode').value });
 }
 
 connect();
