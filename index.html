@@ -228,9 +228,13 @@ function render(s) {
   $('t').textContent = fmt(s.t, 1);
   $('h').textContent = fmt(s.h, 1);
   $('lux').textContent = fmt(s.lux, 0);
-  $('tN').textContent = s.t === null ? 'Lỗi đọc DHT22' : (s.t >= s.cfg.tOn ? 'Nóng – vượt ngưỡng ' + s.cfg.tOn + ' °C' : 'Ngưỡng bật quạt ' + s.cfg.tOn + ' °C');
-  $('luxN').textContent = s.lux === null ? 'Lỗi đọc BH1750' : (s.lux < s.cfg.luxOn ? 'Tối (dưới ' + s.cfg.luxOn + ' lux)' : 'Sáng');
-  $('hN').textContent = s.h === null ? 'Lỗi đọc DHT22' : (s.h >= s.cfg.hOn ? 'Ẩm – vượt ngưỡng ' + s.cfg.hOn + ' %' : (s.cfg.hOn >= 100 ? 'DHT22 · luật độ ẩm đang tắt' : 'Ngưỡng bật quạt ' + s.cfg.hOn + ' %'));
+  const dg = s.diag || {};
+  const dhtMsg = 'Lỗi đọc DHT22' + (dg.dhtFail ? ' (' + dg.dhtFail + ' lần liên tiếp)' : '') + ' – kiểm tra DATA→GPIO' + (dg.pinDht || 13) + ', 3,3 V, GND';
+  $('tN').textContent = s.t === null ? dhtMsg : (s.t >= s.cfg.tOn ? 'Nóng – vượt ngưỡng ' + s.cfg.tOn + ' °C' : 'Ngưỡng bật quạt ' + s.cfg.tOn + ' °C');
+  const bhMsg = dg.bh ? 'BH1750 đọc lỗi' : (dg.i2c ? 'Không thấy BH1750 – bus I2C chỉ có ' + dg.i2c
+                                                 : 'Không thấy thiết bị I2C nào – kiểm tra SDA→21, SCL→22, VCC, GND');
+  $('luxN').textContent = s.lux === null ? bhMsg : (s.lux < s.cfg.luxOn ? 'Tối (dưới ' + s.cfg.luxOn + ' lux)' : 'Sáng');
+  $('hN').textContent = s.h === null ? dhtMsg : (s.h >= s.cfg.hOn ? 'Ẩm – vượt ngưỡng ' + s.cfg.hOn + ' %' : (s.cfg.hOn >= 100 ? 'DHT22 · luật độ ẩm đang tắt' : 'Ngưỡng bật quạt ' + s.cfg.hOn + ' %'));
   $('mot').textContent = s.motion ? 'CÓ NGƯỜI' : 'Không';
   $('mot').style.color = s.motion ? 'var(--warn)' : 'var(--txt)';
   $('dPir').className = 'dot' + (s.pir ? ' hit' : ''); $('dRcwl').className = 'dot' + (s.rcwl ? ' hit' : '');
